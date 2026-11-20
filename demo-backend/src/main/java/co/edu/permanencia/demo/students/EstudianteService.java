@@ -17,11 +17,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /**
@@ -228,26 +228,23 @@ public class EstudianteService {
     public List<Estudiante> listar(String search, String carrera, String sede, String facultad,
                                    Integer semestre, List<Integer> semestres, String categoria,
                                    String riesgo, String estado, String grupo, Integer limit) {
-        Comparator<Estudiante> orden = Comparator.comparingInt(Estudiante::riesgoScore).reversed()
-                .thenComparing(Estudiante::apellido);
-        Stream<Estudiante> stream = streamFiltrado(search, carrera, sede, facultad, semestre,
-                semestres, categoria, riesgo, estado, grupo);
+        Predicate<Estudiante> filtro = filtro(search, carrera, sede, facultad, semestre, semestres, categoria,
+                riesgo, estado, grupo);
+        List<Estudiante> ordenados = ordenadosPorRiesgo();
         if (limit != null && limit > 0) {
-            // Selecciona solo los mejores N sin ordenar un millón de registros.
-            PriorityQueue<Estudiante> cola = new PriorityQueue<>(limit, orden.reversed());
-            stream.forEach(e -> {
-                if (cola.size() < limit) {
-                    cola.add(e);
-                } else if (orden.compare(e, cola.peek()) < 0) {
-                    cola.poll();
-                    cola.add(e);
+            // La copia ya está ordenada: basta tomar los primeros N que cumplen el filtro.
+            List<Estudiante> salida = new ArrayList<>(Math.min(limit, 256));
+            for (Estudiante e : ordenados) {
+                if (filtro.test(e)) {
+                    salida.add(e);
+                    if (salida.size() >= limit) {
+                        break;
+                    }
                 }
-            });
-            List<Estudiante> salida = new ArrayList<>(cola);
-            salida.sort(orden);
+            }
             return List.copyOf(salida);
         }
-        return stream.sorted(orden).toList();
+        return ordenados.stream().filter(filtro).toList();
     }
 
     /** Filtro completo sin ordenar ni copiar la población; lo usan reportes y agregados. */
@@ -255,18 +252,25 @@ public class EstudianteService {
                                              String facultad, Integer semestre,
                                              List<Integer> semestres, String categoria,
                                              String riesgo, String estado, String grupo) {
+        return estudiantes.stream().filter(filtro(search, carrera, sede, facultad, semestre, semestres, categoria,
+                riesgo, estado, grupo));
+    }
+
+    /** Un solo predicado con todos los filtros (el mismo para listados, reportes y agregados). */
+    private Predicate<Estudiante> filtro(String search, String carrera, String sede, String facultad,
+                                         Integer semestre, List<Integer> semestres, String categoria,
+                                         String riesgo, String estado, String grupo) {
         String consulta = search == null ? "" : normalizar(search);
-        return estudiantes.stream()
-                .filter(e -> consulta.isBlank() || coincide(e, consulta))
-                .filter(e -> vacio(carrera) || e.carrera().equalsIgnoreCase(carrera))
-                .filter(e -> vacio(sede) || e.sede().equalsIgnoreCase(sede))
-                .filter(e -> vacio(facultad) || e.facultad().equalsIgnoreCase(facultad))
-                .filter(e -> semestre == null || e.semestre() == semestre)
-                .filter(e -> semestres == null || semestres.isEmpty() || semestres.contains(e.semestre()))
-                .filter(e -> vacio(categoria) || e.categoria().equalsIgnoreCase(categoria))
-                .filter(e -> vacio(riesgo) || e.riesgoActual().equalsIgnoreCase(riesgo))
-                .filter(e -> vacio(estado) || e.estado().equalsIgnoreCase(estado))
-                .filter(e -> vacio(grupo) || e.grupo().equalsIgnoreCase(grupo));
+        return e -> (consulta.isBlank() || coincide(e, consulta))
+                && (vacio(carrera) || e.carrera().equalsIgnoreCase(carrera))
+                && (vacio(sede) || e.sede().equalsIgnoreCase(sede))
+                && (vacio(facultad) || e.facultad().equalsIgnoreCase(facultad))
+                && (semestre == null || e.semestre() == semestre)
+                && (semestres == null || semestres.isEmpty() || semestres.contains(e.semestre()))
+                && (vacio(categoria) || e.categoria().equalsIgnoreCase(categoria))
+                && (vacio(riesgo) || e.riesgoActual().equalsIgnoreCase(riesgo))
+                && (vacio(estado) || e.estado().equalsIgnoreCase(estado))
+                && (vacio(grupo) || e.grupo().equalsIgnoreCase(grupo));
     }
 
     public List<Estudiante> todos() {
@@ -342,6 +346,37 @@ public class EstudianteService {
         cacheProgramas = null;
         cacheSedes = null;
         cacheFacultades = null;
+        ordenadosPorRiesgo = null;
+    }
+
+    /** Orden de los listados: mayor riesgo primero y, a igual riesgo, por apellido. */
+    private static final Comparator<Estudiante> ORDEN_RIESGO =
+            Comparator.comparingInt(Estudiante::riesgoScore).reversed().thenComparing(Estudiante::apellido);
+
+    /**
+     * Copia de la población ya ordenada por riesgo. Antes cada listado recorría y ordenaba los 200.000
+     * estudiantes (o 1,1 millones) en cada petición; con esta copia, un listado con límite solo recorre
+     * hasta reunir los primeros que cumplen el filtro. Se reconstruye cuando cambian los datos.
+     */
+    private volatile List<Estudiante> ordenadosPorRiesgo;
+
+    private List<Estudiante> ordenadosPorRiesgo() {
+        List<Estudiante> actual = ordenadosPorRiesgo;
+        if (actual == null) {
+            synchronized (this) {
+                actual = ordenadosPorRiesgo;
+                if (actual == null) {
+                    actual = estudiantes.stream().sorted(ORDEN_RIESGO).toList();
+                    ordenadosPorRiesgo = actual;
+                }
+            }
+        }
+        return actual;
+    }
+
+    /** Cantidad de estudiantes sin copiar la lista (la usa el healthcheck). */
+    public int total() {
+        return estudiantes.size();
     }
 
     public String sedeDePrograma(String programa) {
@@ -431,6 +466,7 @@ public class EstudianteService {
                     e.fechaIngreso(), List.copyOf(materias), e.historialRiesgo());
             estudiantes.set(i, actualizado);
             indice.put(actualizado.id(), actualizado);
+            ordenadosPorRiesgo = null;
             return actualizado;
         }
         throw ApiException.notFound("Estudiante no encontrado");

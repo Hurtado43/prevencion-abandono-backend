@@ -35,7 +35,7 @@ public class SaludController {
     public Map<String, Object> salud(HttpServletRequest request) {
         Map<String, Object> respuesta = new LinkedHashMap<>();
         respuesta.put("estado", "ok");
-        respuesta.put("estudiantes", estudiantes.todos().size());
+        respuesta.put("estudiantes", estudiantes.total());
         if (diagnosticoIp) {
             respuesta.put("ipCliente", request.getRemoteAddr());
             respuesta.put("seguro", request.isSecure());

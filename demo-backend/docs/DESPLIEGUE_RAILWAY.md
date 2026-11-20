@@ -5,7 +5,7 @@ Proyecto de Railway `courteous-dedication` (entorno `production`) con tres servi
 | Servicio | Origen | Dominio |
 |---|---|---|
 | `demo-backend` | `Hurtado43/prevencion-abandono-backend`, carpeta `/demo-backend`, rama `mejoras-seguridad` | https://demo-backend-production-e8f02b28.up.railway.app |
-| `frontend` | `Hurtado43/prevencion-abandono-frontend`, rama `mejoras-seguridad` | https://frontend-production-d28c0668.up.railway.app |
+| `frontend` | `Hurtado43/prevencion-abandono-frontend`, rama `mejoras-seguridad` | https://prevencion-estudiantil.up.railway.app |
 | `Postgres` | base gestionada de Railway (con volumen) | interno. **El demo hoy no la usa**: guarda todo en memoria |
 
 Railway despliega desde los **forks de Hurtado43** porque su app de GitHub no tiene acceso a los
@@ -26,7 +26,7 @@ se construyen con su `Dockerfile` (Railway lo detecta solo).
   ```
   PORT=8080
   DEMO_POBLACION=200000
-  DEMO_CORS_ORIGINS=https://frontend-production-d28c0668.up.railway.app
+  DEMO_CORS_ORIGINS=https://prevencion-estudiantil.up.railway.app
   SERVER_TOMCAT_REMOTEIP_INTERNALPROXIES=.*
   ANTHROPIC_API_KEY=<la pone una persona del equipo; nunca en el repositorio>
   ```
